@@ -1,6 +1,6 @@
 # Starling Foundries' References and Discussions in support of the metatransactions for Zilliqa project
 
-This repository holds the reference notes and implementations for various scilla smart contracts required to make the metatransactions work in a Zilliqa-native way. 
+This repository holds the reference notes and implementations for various scilla smart contracts required to make the metatransactions work in a Zilliqa-native way. [uPort](https://github.com/uport-project/uport-identity#send-a-meta-tx) has made the intial strides but appepars to have moved on from TxRelays.
 
 ## Bouncer Proxy
 
