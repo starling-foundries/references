@@ -195,3 +195,85 @@ transition Allowance (tokenOwner : ByStr20, spender : ByStr20)
       send msgs
   end
 end
+
+(*It might be worth considering specifying the nonce at the client - explore further after phase 1*)
+transistion TransferPreSigned( 
+  from: ByStr20,
+  to: ByStr20,
+  amount: Uint128,
+  fee: Uint128,
+  relay: ByStr20,
+  sig: _ ,
+  metaHash: _,
+  targetContract: _
+  )
+  (*Check that relay is the actual message _sender, emit event if failed*)
+  validRelay <- builtin eq _sender relay
+  match validRelay with
+    | False =>
+      e = { _eventname : "relayFailed"; relay : _sender; _amount : Uint128 0; message : "RelayNotSender" };
+    event e
+    | True =>
+  (*verify that the from pubkey matches the signature and hash to ensure the relay has sent a valid metaTx for this contract, emit event if failed*)
+      validTx <- builtin schnorr_verify from metaHash sig
+      match validTX with
+      | False =>
+      e = { _eventname : "relayFailed"; relay : _sender; _amount : Uint128 0; message : "InvalidMetaSig" };
+    event e 
+      | True =>
+(*use modified transfer code to execute the transfer in contract*)
+        bal <- balances[from];
+        match bal with
+        | Some b =>
+          (*does sender have enough to cover fee and transfer?*)
+          let total = builtin add amount fee
+          can_do = le_int total b;
+          match can_do with
+          | True =>
+            (* subtract amount from and add it to "to" *)
+            new_client_bal = builtin sub b total;
+            balances[from] := new_client_bal;
+
+            (* Adds amount to "to" address *)
+            to_bal <- balances[to];
+            new_to_bal = match to_bal with
+            | Some x => builtin add x amount
+            | None => amount
+            end;
+
+            balances[to] := new_to_bal;
+            msg = { _tag : "TransferSuccess"; _to : _sender; _amount : zero;
+                    sender : _sender; to : to; amount : amount};
+            msgs = one_msg msg;
+            send msgs
+            (*transfer fee to relayer if any*)
+            match fee with
+            | Some x =>
+              relayer_bal <- balances[relay]
+              match relayer_bal with
+              | Some y => 
+                new_relayer_bal = builtin add relayer_bal fee
+              | None =>
+                new_relayer_bal = fee
+                
+              balances[relayer] := new_relayer_bal
+             
+
+            | None => 
+          | False =>
+            (* balance not sufficient. *)
+            msg = { _tag : "TransferFailure"; _to : _sender; _amount : zero;
+                    sender : _sender; to : to; amount : zero};
+            msgs = one_msg msg;
+            send msgs
+          end
+        | None =>
+          (* no balance record, can't transfer *)
+          msg = { _tag : "TransferFailure"; _to : _sender; _amount : zero;
+                  sender : _sender; to : to; amount : zero};
+          msgs = one_msg msg;
+          send msgs
+        
+          end
+          end
+
