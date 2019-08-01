@@ -1,10 +1,13 @@
 # Overview
 
-The goal of a metatransaction offering is to foremost abstract away dealing with gas costs in native fuel for the sake of easier onboarding of early users. This directory contains the necessary components to make the developer experience similarly transparent. The ultimate goal is to provide a scilla library that can be included in an arbitrary token contract to enable a relayer to submit valid transactions to that contract in a secure and trustless manner.
+This scilla contract implements most of the ERC-1776 and ERC-865 functionality. Currently it is missing: 
 
-## Preliminary Architecture
+- [ ] create a hash of payload in-contract
+- [ ] validate pubkey, sig against this payload
+- [ ] validate contract address
+- [ ] Account nonces or a single bouncer limitation.
 
-## Roadblocks
+NOTE: if a metaTransfer function is not included in the initial contract it is difficult to incorporate the gasless functionality after it launches. 
 
 ## Prior Art
 [ERC-865: Meta Transaction integration for gas payment in erc20 tokens](https://github.com/ethereum/EIPs/issues/865)

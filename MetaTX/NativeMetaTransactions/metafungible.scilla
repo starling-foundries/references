@@ -1,0 +1,257 @@
+scilla_version 0
+
+(* This contract implements a fungible token interface a la ERC20.*)
+
+(***************************************************)
+(*               Associated library                *)
+(***************************************************)
+library FungibleToken
+
+let min_int =
+  fun (a : Uint128) => fun (b : Uint128) =>
+  let alt = builtin lt a b in
+  match alt with
+  | True =>
+    a
+  | False =>
+    b
+  end
+
+let le_int =
+  fun (a : Uint128) => fun (b : Uint128) =>
+    let x = builtin lt a b in
+    match x with
+    | True => True
+    | False =>
+      let y = builtin eq a b in
+      match y with
+      | True => True
+      | False => False
+      end
+    end
+    
+    
+let accepted_code = Int32 1
+let low_balance = Int32 2
+let no_balance  = Int32 3
+let invalid_relay  = Int32 4
+let wrong_contract  = Int32 5
+
+
+(***************************************************)
+(*             The contract definition             *)
+(***************************************************)
+
+contract FungibleToken
+(owner : ByStr20,
+ total_tokens : Uint128,
+ decimals : Uint32,
+ name : String,
+ symbol : String, 
+ bouncer: ByStr20)
+
+(* Initial balance is not stated explicitly: it's initialized when creating the contract. *)
+
+field balances : Map ByStr20 Uint128 =
+  let m = Emp ByStr20 Uint128 in
+    builtin put m owner total_tokens
+field allowed : Map ByStr20 (Map ByStr20 Uint128) = Emp ByStr20 (Map ByStr20 Uint128)
+
+transition BalanceOf (tokenOwner : ByStr20)
+  bal <- balances[tokenOwner];
+  match bal with
+  | Some v =>
+	e = {_eventname : "BalanceOf"; address : tokenOwner; balance : v};
+	event e
+  | None =>
+	e = {_eventname : "BalanceOf"; address : tokenOwner; balance : Uint128 0};
+    event e
+  end
+end
+
+transition TotalSupply ()
+  e = {_eventname : "TotalSupply"; caller : _sender; balance : total_tokens};
+  event e
+end
+
+transition Transfer (to : ByStr20, tokens : Uint128)
+  bal <- balances[_sender];
+  match bal with
+  | Some b =>
+    can_do = le_int tokens b;
+    match can_do with
+    | True =>
+      (* subtract tokens from _sender and add it to "to" *)
+      new_sender_bal = builtin sub b tokens;
+      balances[_sender] := new_sender_bal;
+
+      (* Adds tokens to "to" address *)
+      to_bal <- balances[to];
+      new_to_bal = match to_bal with
+      | Some x => builtin add x tokens
+      | None => tokens
+      end;
+
+  	  balances[to] := new_to_bal;
+      e = {_eventname : "TransferSuccess"; sender : _sender; recipient : to; amount : tokens};
+      event e
+    | False =>
+      (* balance not sufficient. *)
+      e = {_eventname : "TransferFailure"; sender : _sender; recipient : to; amount : Uint128 0};
+      event e
+    end
+  | None =>
+    (* no balance record, can't transfer *)
+  	e = {_eventname : "TransferFailure"; sender : _sender; recipient : to; amount : Uint128 0};
+    event e
+  end
+end
+
+transition TransferFrom (from : ByStr20, to : ByStr20, tokens : Uint128)
+  bal <- balances[from];
+  (* Check if _sender has been authorized by "from" *)
+  sender_allowed_from <- allowed[from][_sender];
+  match bal with
+  | Some a =>
+    match sender_allowed_from with
+    | Some b =>
+        (* We can only transfer the minimum of available or authorized tokens *)
+        t = min_int a b;
+        can_do = le_int tokens t;
+        match can_do with
+        | True =>
+            (* tokens is what we should subtract from "from" and add to "to" *)
+            new_from_bal = builtin sub a tokens;
+            balances[from] := new_from_bal;
+            to_bal <- balances[to];
+            match to_bal with
+            | Some tb =>
+                new_to_bal = builtin add tb tokens;
+                balances[to] := new_to_bal
+            | None =>
+                (* "to" has no balance. So just set it to tokens *)
+                balances[to] := tokens
+            end;
+            (* reduce "allowed" by "tokens" *)
+            new_allowed = builtin sub b tokens;
+            allowed[from][_sender] := new_allowed;
+            e = {_eventname : "TransferFromSuccess"; sender : from; recipient : to; amount : tokens};
+            event e
+        | False =>
+            e = {_eventname : "TransferFromFailure"; sender : from; recipient : to; amount : Uint128 0};
+            event e
+        end
+    | None =>
+        e = {_eventname : "TransferFromFailure"; sender : from; recipient : to; amount : Uint128 0};
+        event e
+    end
+  | None =>
+	e = {_eventname : "TransferFromFailure"; sender : from; recipient : to; amount : Uint128 0};
+	event e
+  end
+end
+
+transition Approve (spender : ByStr20, tokens : Uint128)
+  allowed[_sender][spender] := tokens;
+  e = {_eventname : "ApproveSuccess"; approver : _sender; spender : spender; amount : tokens};
+  event e
+end
+
+transition Allowance (tokenOwner : ByStr20, spender : ByStr20)
+  spender_allowance <- allowed[tokenOwner][spender];
+  match spender_allowance with
+  | Some n =>
+      e = {_eventname : "Allowance"; owner : tokenOwner; spender : spender; amount : n};
+      event e
+  | None =>
+      e = {_eventname : "Allowance"; owner : tokenOwner; spender : spender; amount : Uint128 0};
+      event e
+  end
+end
+
+procedure TransferEvent (failure : Bool, error_code : Int32)
+  match failure with
+  | False =>
+    e = {_eventname : "MetaTransferSuccess"; donor : _sender;
+         amount : _amount; code : accepted_code};
+    event e
+  | True =>
+    e = {_eventname : "MetaTransferFailure"; donor : _sender;
+         amount : _amount; code : error_code};
+    event e
+  end
+end
+
+(*Beginning of the metatransactions codes*)
+
+procedure PerformTransfer(from: ByStr20, to: ByStr20, amount: Uint128, fee: Uint128, total:Uint128)
+    
+    (* subtract amount from and add it to "to" *)
+    new_client_bal = builtin sub b total;
+    balances[from] := new_client_bal;
+
+    (* Adds amount to "to" address *)
+    to_bal <- balances[to];
+    new_to_bal = match to_bal with
+        | Some x => builtin add x amount
+        | None => amount
+    end;
+
+    balances[to] := new_to_bal;
+    msg = { _tag : "TransferSuccess"; _to : _sender; _amount : zero;
+            sender : _sender; to : to; amount : amount};
+    msgs = one_msg msg;
+    send msgs
+    
+    (*transfer fee to relayer if any*)
+    match fee with
+    | Some x =>
+      relayer_bal <- balances[relay]
+      match relayer_bal with
+      | Some y => 
+        new_relayer_bal = builtin add relayer_bal fee
+      | None =>
+        new_relayer_bal = fee
+        
+      balances[relayer] := new_relayer_bal
+end
+
+transition MetaTransfer(from: ByStr20, pubkey: ByStr33, to: ByStr20, amount: Uint128, fee: Uint128, relay:ByStr20, sig:ByStr64, metaHash: ByStr, ticker: String)
+    validRelay <- builtin eq _sender relay
+    validTarget <- builtin eq ticker symbol (*TODO: validate contract address, name or symbol for sanity check*)
+
+(*TODO: use signature validations to ensure message payload is from "from" and unaltered*)
+    (*ex: validPayload <- builtin schnorr_verify pubkey metaHash sig)
+    match validRelay with
+        | False => TransferEvent True 4
+        | True => 
+            bal <- balances[from]
+            match bal with
+                | Some b =>
+                    (*does sender have enough to cover fee and transfer?*)
+                    let total = builtin add amount fee
+                    can_do = le_int total b;
+                    match can_do with
+                    | True =>
+                        PerformTransfer from to amount fee total
+                         
+                    | False =>
+                        (* balance not sufficient. *)
+                        TransferEvent True 2
+                        msg = { _tag : "TransferFailure"; _to : _sender; _amount : zero;
+                                sender : _sender; to : to; amount : zero};
+                        msgs = one_msg msg;
+                        send msgs
+                    end
+                | None =>
+                    (* sender has no balance. *)
+                    TransferEvent True 3
+                    msg = { _tag : "TransferFailure"; _to : _sender; _amount : zero;
+                            sender : _sender; to : to; amount : zero};
+                    msgs = one_msg msg;
+                    send msgs
+            end
+        end
+    end
+
+end
